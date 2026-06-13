@@ -35,8 +35,8 @@ local function mkdir(path)
   vim.fn.mkdir(path, "p")
 end
 
-local function current_repo_root()
-  return run({ "git", "rev-parse", "--show-toplevel" })
+local function current_repo_root(cwd)
+  return run({ "git", "rev-parse", "--show-toplevel" }, { cwd = cwd })
 end
 
 local function current_repo_name(repo)
@@ -105,9 +105,6 @@ local function select_start_point(repo)
   if choice == nil or choice < 1 or choice > #choices then
     return false
   end
-  if choice == 1 then
-    return nil
-  end
 
   return choices[choice]
 end
@@ -132,6 +129,190 @@ local function copy_setup_files(source, target)
   end
 end
 
+local function create_input(opts, on_confirm)
+  local snacks = rawget(_G, "Snacks")
+  if snacks and snacks.input then
+    if type(snacks.input) == "function" then
+      return snacks.input(opts, on_confirm)
+    elseif snacks.input.input then
+      return snacks.input.input(opts, on_confirm)
+    end
+  end
+
+  vim.ui.input(opts, on_confirm)
+end
+
+local function is_subpath(path, root)
+  path = normalize_dir(path)
+  root = normalize_dir(root)
+  return path == root or path:sub(1, #root + 1) == root .. "/"
+end
+
+local function discover_repos()
+  local repos = {}
+  local seen = {}
+  local workspace_root = vim.fn.expand(config.workspace_root)
+
+  local function add(path)
+    local ok, repo = pcall(current_repo_root, path)
+    if not ok or repo == "" or is_subpath(repo, workspace_root) or seen[repo] then
+      return
+    end
+
+    seen[repo] = true
+    repos[#repos + 1] = repo
+  end
+
+  local ok, current = pcall(current_repo_root)
+  if ok then
+    add(current)
+    add(vim.fn.fnamemodify(current, ":h"))
+  end
+
+  local roots = {
+    vim.fn.expand("~/workspace"),
+    vim.fn.expand("~/code"),
+    vim.fn.expand("~/src"),
+    vim.fn.expand("~/dev"),
+    vim.fn.expand("~/projects"),
+  }
+
+  for _, root in ipairs(roots) do
+    if exists(root) then
+      local result = vim.system({ "find", root, "-maxdepth", "4", "-name", ".git" }, { text = true }):wait()
+      if result.code == 0 then
+        for git_path in (result.stdout or ""):gmatch("[^\n]+") do
+          add(vim.fn.fnamemodify(git_path, ":h"))
+        end
+      end
+    end
+  end
+
+  table.sort(repos, function(a, b)
+    if a == current then
+      return true
+    elseif b == current then
+      return false
+    end
+    return a < b
+  end)
+
+  return repos
+end
+
+local function picker_select(opts)
+  local snacks = rawget(_G, "Snacks")
+  if snacks and snacks.picker and snacks.picker.pick then
+    return snacks.picker.pick({
+      title = opts.title,
+      prompt = opts.prompt,
+      items = opts.items,
+      format = "text",
+      preview = "none",
+      confirm = function(picker, item)
+        picker:close()
+        if item then
+          vim.schedule(function()
+            opts.on_choice(item.value)
+          end)
+        end
+      end,
+    })
+  end
+
+  vim.ui.select(opts.values, {
+    prompt = opts.title,
+    format_item = opts.format_item,
+  }, opts.on_choice)
+end
+
+local function select_repo(on_choice)
+  local repos = discover_repos()
+  if #repos == 0 then
+    notify("No Git repositories found", vim.log.levels.ERROR)
+    return
+  end
+
+  local function label(repo)
+    return current_repo_name(repo) .. "  " .. repo
+  end
+
+  local items = {}
+  for _, repo in ipairs(repos) do
+    items[#items + 1] = {
+      text = label(repo),
+      value = repo,
+    }
+  end
+
+  picker_select({
+    title = "Create fork in repository",
+    prompt = "Repo  ",
+    values = repos,
+    items = items,
+    format_item = label,
+    on_choice = on_choice,
+  })
+end
+
+local function repo_branches(repo)
+  local result = vim.system({ "git", "branch", "--all", "--format=%(refname:short)" }, { cwd = repo, text = true }):wait()
+  if result.code ~= 0 then
+    error((result.stderr and result.stderr ~= "" and result.stderr) or "Could not list Git branches")
+  end
+
+  local branches = {}
+  local seen = {}
+  local function add(branch)
+    branch = vim.trim(branch or "")
+    if branch == "" or branch:match("/HEAD$") or seen[branch] then
+      return
+    end
+    seen[branch] = true
+    branches[#branches + 1] = branch
+  end
+
+  add("main")
+  for branch in (result.stdout or ""):gmatch("[^\n]+") do
+    add(branch)
+  end
+
+  table.sort(branches, function(a, b)
+    if a == "main" then
+      return true
+    elseif b == "main" then
+      return false
+    elseif a == "master" then
+      return true
+    elseif b == "master" then
+      return false
+    end
+    return a < b
+  end)
+
+  return branches
+end
+
+local function select_branch(repo, on_choice)
+  local branches = repo_branches(repo)
+  local items = {}
+  for _, branch in ipairs(branches) do
+    items[#items + 1] = {
+      text = branch,
+      value = branch,
+    }
+  end
+
+  picker_select({
+    title = "Base branch for " .. current_repo_name(repo),
+    prompt = "Branch  ",
+    values = branches,
+    items = items,
+    format_item = tostring,
+    on_choice = on_choice,
+  })
+end
+
 local function create_tmux_session(session_name, cwd)
   local has_session = vim.system({ "tmux", "has-session", "-t", session_name }, { text = true }):wait()
   if has_session.code ~= 0 then
@@ -153,14 +334,18 @@ end
 function M.create(opts)
   opts = opts or {}
 
+  if not opts.name then
+    return M.create_dialog()
+  end
+
   require_executable("git")
   require_executable("tmux")
   require_executable("nvim")
   require_tmux_client()
 
-  local repo = opts.repo or current_repo_root()
+  local repo = current_repo_root(opts.repo)
   local repo_name = current_repo_name(repo)
-  local name = opts.name or vim.fn.input("Fork name: ")
+  local name = vim.trim(opts.name)
 
   if name == nil or name == "" then
     notify("Fork creation cancelled", vim.log.levels.WARN)
@@ -168,7 +353,7 @@ function M.create(opts)
   end
 
   local branch = opts.branch or name
-  local start_point = opts.start_point
+  local start_point = opts.start_point or opts.base
   if start_point == nil and opts.select_start_point then
     start_point = select_start_point(repo)
     if start_point == false then
@@ -208,6 +393,7 @@ function M.create(opts)
     name = name,
     branch = branch,
     start_point = start_point,
+    base = start_point,
     repo = repo,
     path = path,
     session_name = session_name,
@@ -216,6 +402,47 @@ function M.create(opts)
   switch_to_tmux_session(session_name)
   notify("Created fork: " .. name)
   return fork
+end
+
+function M.create_dialog()
+  select_repo(function(repo)
+    if not repo then
+      notify("Fork creation cancelled", vim.log.levels.WARN)
+      return
+    end
+
+    local ok, err = pcall(select_branch, repo, function(base)
+      if not base then
+        notify("Fork creation cancelled", vim.log.levels.WARN)
+        return
+      end
+
+      create_input({
+        prompt = "Fork name for " .. current_repo_name(repo) .. " from " .. base .. ": ",
+        default = "",
+        icon = "󰘬 ",
+      }, function(name)
+        name = vim.trim(name or "")
+        if name == "" then
+          notify("Fork creation cancelled", vim.log.levels.WARN)
+          return
+        end
+
+        local create_ok, create_err = pcall(M.create, {
+          repo = repo,
+          name = name,
+          base = base,
+        })
+        if not create_ok then
+          notify(create_err, vim.log.levels.ERROR)
+        end
+      end)
+    end)
+
+    if not ok then
+      notify(err, vim.log.levels.ERROR)
+    end
+  end)
 end
 
 function M.delete(opts)

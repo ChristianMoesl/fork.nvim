@@ -49,7 +49,7 @@ Current golden-path behavior:
 
 Commands:
 
-- `:ForkCreate [name]` asks what branch to fork from, creates a new Git worktree, starts a `tmux` session running Neovim, and immediately switches to it.
+- `:ForkCreate` opens a Snacks/vim.ui fuzzy repository picker, then a fuzzy base-branch picker, then asks for the fork name. It creates a new Git worktree, starts a `tmux` session running Neovim, and immediately switches to it.
 - `:ForkDelete [path]` removes a Git worktree and kills the matching `tmux` session.
 
 Lua API:
