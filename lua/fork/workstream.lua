@@ -15,6 +15,18 @@ local function run(args, opts)
   return vim.trim(result.stdout or "")
 end
 
+local function require_executable(name)
+  if vim.fn.executable(name) ~= 1 then
+    error("fork.nvim requires `" .. name .. "` to be installed")
+  end
+end
+
+local function require_tmux_client()
+  if vim.env.TMUX == nil or vim.env.TMUX == "" then
+    error("ForkCreate must be run from inside a tmux session so fork.nvim can switch to the new fork")
+  end
+end
+
 local function exists(path)
   return vim.uv.fs_stat(path) ~= nil
 end
@@ -54,8 +66,12 @@ end
 local function create_tmux_session(session_name, cwd)
   local has_session = vim.system({ "tmux", "has-session", "-t", session_name }, { text = true }):wait()
   if has_session.code ~= 0 then
-    run({ "tmux", "new-session", "-d", "-s", session_name, "-c", cwd })
+    run({ "tmux", "new-session", "-d", "-s", session_name, "-c", cwd, "nvim ." })
   end
+end
+
+local function switch_to_tmux_session(session_name)
+  run({ "tmux", "switch-client", "-t", session_name })
 end
 
 local function kill_tmux_session(session_name)
@@ -68,12 +84,17 @@ end
 function M.create(opts)
   opts = opts or {}
 
+  require_executable("git")
+  require_executable("tmux")
+  require_executable("nvim")
+  require_tmux_client()
+
   local repo = opts.repo or current_repo_root()
   local repo_name = current_repo_name(repo)
-  local name = opts.name or vim.fn.input("Workstream name: ")
+  local name = opts.name or vim.fn.input("Fork name: ")
 
   if name == nil or name == "" then
-    notify("Workstream creation cancelled", vim.log.levels.WARN)
+    notify("Fork creation cancelled", vim.log.levels.WARN)
     return
   end
 
@@ -85,14 +106,23 @@ function M.create(opts)
   mkdir(vim.fn.fnamemodify(path, ":h"))
 
   if exists(path) then
-    error("Workspace already exists: " .. path)
+    error("Fork already exists: " .. path)
   end
 
-  run({ "git", "worktree", "add", "-b", branch, path }, { cwd = repo })
-  copy_setup_files(repo, path)
-  create_tmux_session(session_name, path)
+  local ok, err = pcall(function()
+    run({ "git", "worktree", "add", "-b", branch, path }, { cwd = repo })
+    copy_setup_files(repo, path)
+    create_tmux_session(session_name, path)
+  end)
 
-  local workstream = {
+  if not ok then
+    if exists(path) then
+      pcall(run, { "git", "worktree", "remove", "--force", path }, { cwd = repo })
+    end
+    error(err)
+  end
+
+  local fork = {
     name = name,
     branch = branch,
     repo = repo,
@@ -100,8 +130,9 @@ function M.create(opts)
     session_name = session_name,
   }
 
-  notify("Created workstream: " .. name)
-  return workstream
+  switch_to_tmux_session(session_name)
+  notify("Created fork: " .. name)
+  return fork
 end
 
 function M.delete(opts)

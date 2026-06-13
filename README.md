@@ -40,13 +40,15 @@ Current golden-path behavior:
 
 - workstreams are created below `~/workstreams`
 - `.env` and `.env.local` are copied when present
-- every workstream gets a mandatory `tmux` session
+- `ForkCreate` must be run from inside `tmux`
+- every workstream gets a mandatory `tmux` session running `nvim .`
+- after creation, fork.nvim immediately switches to the new `tmux` session
 - `<leader>wc` creates a workstream
 - `<leader>wd` deletes a workstream
 
 Commands:
 
-- `:ForkCreate [name]` creates a new Git worktree and `tmux` session.
+- `:ForkCreate [name]` creates a new Git worktree, starts a `tmux` session running Neovim, and immediately switches to it.
 - `:ForkDelete [path]` removes a Git worktree and kills the matching `tmux` session.
 
 Lua API:
