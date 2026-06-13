@@ -43,6 +43,53 @@ local function current_repo_name(repo)
   return vim.fn.fnamemodify(repo, ":t")
 end
 
+local function list_start_points(repo)
+  local output = run({
+    "git",
+    "for-each-ref",
+    "--format=%(refname)%09%(refname:short)%09%(symref)",
+    "refs/heads",
+    "refs/remotes",
+  }, { cwd = repo })
+  local branches = {}
+
+  for line in output:gmatch("[^\n]+") do
+    local refname, short_name, symref = line:match("^([^\t]+)\t([^\t]+)\t?(.*)$")
+    if refname and short_name and not refname:match("^refs/remotes/.+/HEAD$") and symref == "" then
+      table.insert(branches, short_name)
+    end
+  end
+
+  return branches
+end
+
+local function select_start_point(repo)
+  local branches = list_start_points(repo)
+  if #branches == 0 then
+    return nil
+  end
+
+  local choices = { "Create from current HEAD" }
+  for _, branch in ipairs(branches) do
+    table.insert(choices, branch)
+  end
+
+  local menu = { "Fork from:" }
+  for index, choice in ipairs(choices) do
+    table.insert(menu, index .. ". " .. choice)
+  end
+
+  local choice = vim.fn.inputlist(menu)
+  if choice == nil or choice < 1 or choice > #choices then
+    return false
+  end
+  if choice == 1 then
+    return nil
+  end
+
+  return choices[choice]
+end
+
 local function session_name_for(repo_name, workstream_name)
   return (repo_name .. "-" .. workstream_name):gsub("[^%w_-]", "-")
 end
@@ -99,6 +146,15 @@ function M.create(opts)
   end
 
   local branch = opts.branch or name
+  local start_point = opts.start_point
+  if start_point == nil and opts.select_start_point then
+    start_point = select_start_point(repo)
+    if start_point == false then
+      notify("Fork creation cancelled", vim.log.levels.WARN)
+      return
+    end
+  end
+
   local workspace_root = vim.fn.expand(config.workspace_root)
   local path = opts.path or (workspace_root .. "/" .. repo_name .. "/" .. name)
   local session_name = opts.session_name or session_name_for(repo_name, name)
@@ -110,7 +166,11 @@ function M.create(opts)
   end
 
   local ok, err = pcall(function()
-    run({ "git", "worktree", "add", "-b", branch, path }, { cwd = repo })
+    local args = { "git", "worktree", "add", "-b", branch, path }
+    if start_point then
+      table.insert(args, start_point)
+    end
+    run(args, { cwd = repo })
     copy_setup_files(repo, path)
     create_tmux_session(session_name, path)
   end)
@@ -125,6 +185,7 @@ function M.create(opts)
   local fork = {
     name = name,
     branch = branch,
+    start_point = start_point,
     repo = repo,
     path = path,
     session_name = session_name,

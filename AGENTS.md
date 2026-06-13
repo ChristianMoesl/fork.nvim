@@ -19,6 +19,7 @@ A workstream currently means:
 
 ## Implementation guidance
 
+- Always push completed work to remote `main`.
 - Prefer simple, explicit behavior over options.
 - Do not add configuration unless the user explicitly asks for it later.
 - Keep the workflow keyboard-first.

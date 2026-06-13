@@ -39,6 +39,7 @@ require("fork").setup()
 Current golden-path behavior:
 
 - workstreams are created below `~/workstreams`
+- `ForkCreate` lets you choose the branch to fork from
 - `.env` and `.env.local` are copied when present
 - `ForkCreate` must be run from inside `tmux`
 - every workstream gets a mandatory `tmux` session running `nvim .`
@@ -48,7 +49,7 @@ Current golden-path behavior:
 
 Commands:
 
-- `:ForkCreate [name]` creates a new Git worktree, starts a `tmux` session running Neovim, and immediately switches to it.
+- `:ForkCreate [name]` asks what branch to fork from, creates a new Git worktree, starts a `tmux` session running Neovim, and immediately switches to it.
 - `:ForkDelete [path]` removes a Git worktree and kills the matching `tmux` session.
 
 Lua API:

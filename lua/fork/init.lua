@@ -8,7 +8,7 @@ M.delete = workstream.delete
 
 function M.setup()
   vim.api.nvim_create_user_command("ForkCreate", function(command)
-    M.create({ name = command.args ~= "" and command.args or nil })
+    M.create({ name = command.args ~= "" and command.args or nil, select_start_point = true })
   end, {
     nargs = "?",
     desc = "Create a new fork.nvim fork",
@@ -24,7 +24,9 @@ function M.setup()
     force = true,
   })
 
-  vim.keymap.set("n", config.keymaps.create, M.create, { desc = "Create fork" })
+  vim.keymap.set("n", config.keymaps.create, function()
+    M.create({ select_start_point = true })
+  end, { desc = "Create fork" })
   vim.keymap.set("n", config.keymaps.delete, M.delete, { desc = "Delete workstream" })
 end
 
