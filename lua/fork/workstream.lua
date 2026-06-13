@@ -43,24 +43,49 @@ local function current_repo_name(repo)
   return vim.fn.fnamemodify(repo, ":t")
 end
 
+local function branch_sort_key(branch)
+  local name = branch:gsub("^origin/", "")
+  if name == "main" then
+    return "0"
+  end
+  if name == "master" then
+    return "1"
+  end
+  return "2" .. name
+end
+
+local function sort_branches(branches)
+  table.sort(branches, function(left, right)
+    return branch_sort_key(left) < branch_sort_key(right)
+  end)
+end
+
 local function list_start_points(repo)
   local output = run({
     "git",
     "for-each-ref",
     "--format=%(refname)%09%(refname:short)%09%(symref)",
     "refs/heads",
-    "refs/remotes",
+    "refs/remotes/origin",
   }, { cwd = repo })
-  local branches = {}
+  local origin_branches = {}
+  local local_branches = {}
 
   for line in output:gmatch("[^\n]+") do
     local refname, short_name, symref = line:match("^([^\t]+)\t([^\t]+)\t?(.*)$")
     if refname and short_name and not refname:match("^refs/remotes/.+/HEAD$") and symref == "" then
-      table.insert(branches, short_name)
+      if short_name:match("^origin/") then
+        table.insert(origin_branches, short_name)
+      elseif refname:match("^refs/heads/") then
+        table.insert(local_branches, short_name)
+      end
     end
   end
 
-  return branches
+  sort_branches(origin_branches)
+  sort_branches(local_branches)
+
+  return vim.list_extend(origin_branches, local_branches)
 end
 
 local function select_start_point(repo)
@@ -69,10 +94,7 @@ local function select_start_point(repo)
     return nil
   end
 
-  local choices = { "Create from current HEAD" }
-  for _, branch in ipairs(branches) do
-    table.insert(choices, branch)
-  end
+  local choices = branches
 
   local menu = { "Fork from:" }
   for index, choice in ipairs(choices) do
