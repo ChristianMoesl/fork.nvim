@@ -42,14 +42,16 @@ Current golden-path behavior:
 - `ForkCreate` lets you choose the branch to fork from
 - `.env` and `.env.local` are copied when present
 - `ForkCreate` must be run from inside `tmux`
-- every workstream gets a mandatory `tmux` session running `nvim .`
+- every workstream gets a mandatory `tmux` session with two windows: `pi` and `nvim`
+- the `pi` window starts a new pi agent session named after the `tmux` session
+- the `nvim` window runs `nvim .`
 - after creation, fork.nvim immediately switches to the new `tmux` session
 - `<leader>wc` creates a workstream
 - `<leader>wd` deletes a workstream
 
 Commands:
 
-- `:ForkCreate` opens a Snacks/vim.ui fuzzy repository picker, then a fuzzy base-branch picker, then asks for the fork name. It creates a new Git worktree, starts a `tmux` session running Neovim, and immediately switches to it.
+- `:ForkCreate` opens a Snacks/vim.ui fuzzy repository picker, then a fuzzy base-branch picker, then asks for the fork name. It creates a new Git worktree, starts a `tmux` session with `pi` and `nvim` windows, and immediately switches to it.
 - `:ForkDelete [path]` removes a Git worktree and kills the matching `tmux` session.
 
 Lua API:

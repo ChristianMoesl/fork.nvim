@@ -110,7 +110,12 @@ local function select_start_point(repo)
 end
 
 local function session_name_for(repo_name, workstream_name)
-  return (repo_name .. "-" .. workstream_name):gsub("[^%w_-]", "-")
+  local name = (repo_name .. "-" .. workstream_name):gsub("[^%w_-]", "-")
+  name = name:gsub("^[^%w]+", ""):gsub("[^%w]+$", "")
+  if name == "" then
+    return "fork"
+  end
+  return name
 end
 
 local function normalize_dir(path)
@@ -316,7 +321,12 @@ end
 local function create_tmux_session(session_name, cwd)
   local has_session = vim.system({ "tmux", "has-session", "-t", session_name }, { text = true }):wait()
   if has_session.code ~= 0 then
-    run({ "tmux", "new-session", "-d", "-s", session_name, "-c", cwd, "nvim ." })
+    local escaped_session_name = vim.fn.shellescape(session_name)
+    local pi_command = "pi --session-id " .. escaped_session_name .. " --name " .. escaped_session_name
+
+    run({ "tmux", "new-session", "-d", "-s", session_name, "-n", "pi", "-c", cwd, pi_command })
+    run({ "tmux", "new-window", "-t", session_name .. ":", "-n", "nvim", "-c", cwd, "nvim ." })
+    run({ "tmux", "select-window", "-t", session_name .. ":pi" })
   end
 end
 
@@ -340,6 +350,7 @@ function M.create(opts)
 
   require_executable("git")
   require_executable("tmux")
+  require_executable("pi")
   require_executable("nvim")
   require_tmux_client()
 
