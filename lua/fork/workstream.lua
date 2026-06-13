@@ -261,41 +261,7 @@ local function select_repo(on_choice)
 end
 
 local function repo_branches(repo)
-  local result = vim.system({ "git", "branch", "--all", "--format=%(refname:short)" }, { cwd = repo, text = true }):wait()
-  if result.code ~= 0 then
-    error((result.stderr and result.stderr ~= "" and result.stderr) or "Could not list Git branches")
-  end
-
-  local branches = {}
-  local seen = {}
-  local function add(branch)
-    branch = vim.trim(branch or "")
-    if branch == "" or branch:match("/HEAD$") or seen[branch] then
-      return
-    end
-    seen[branch] = true
-    branches[#branches + 1] = branch
-  end
-
-  add("main")
-  for branch in (result.stdout or ""):gmatch("[^\n]+") do
-    add(branch)
-  end
-
-  table.sort(branches, function(a, b)
-    if a == "main" then
-      return true
-    elseif b == "main" then
-      return false
-    elseif a == "master" then
-      return true
-    elseif b == "master" then
-      return false
-    end
-    return a < b
-  end)
-
-  return branches
+  return list_start_points(repo)
 end
 
 local function select_branch(repo, on_choice)
